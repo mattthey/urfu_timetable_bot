@@ -1,0 +1,1 @@
+web: java -jar target/urfu_timetable_bot-1.0-SNAPSHOT-jar-with-dependencies.jar
