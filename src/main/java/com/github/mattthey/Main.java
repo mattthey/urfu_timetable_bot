@@ -17,7 +17,7 @@ import com.sun.net.httpserver.HttpServer;
  */
 public class Main
 {
-    private static final String BOT_DESCRIPTION = "Тут должно быть что-то умное";
+    private static final String BOT_DESCRIPTION = "I will get everything I want.";
     public static void main(String[] args) throws TelegramApiException, IOException, SQLException
     {
         final String botUsername = System.getenv("botUsername");
