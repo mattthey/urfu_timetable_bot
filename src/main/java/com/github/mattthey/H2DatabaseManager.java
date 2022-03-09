@@ -1,5 +1,7 @@
 package com.github.mattthey;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -9,11 +11,12 @@ import org.h2.jdbcx.JdbcConnectionPool;
 import org.h2.jdbcx.JdbcDataSource;
 
 /**
- *
+ * Менеджер БД H2
  */
 public class H2DatabaseManager
 {
-    private static final String JDBC_URL = "jdbc:h2:mem:tgbot";
+    private static final Path DIRECTORY_DB;
+    private static final String JDBC_URL;
     private static final String JDBC_USERNAME = "tgbot";
     private static final String JDBC_PASSWORD = "tgbot";
 
@@ -23,6 +26,7 @@ public class H2DatabaseManager
                 groupId BIGINT
             )""";
     private static final String INSERT_SETTINGS_SQL = "INSERT INTO settings(chatId, groupId) VALUES (?, ?)";
+    private static final String EDIT_SETTINGS_SQL = "UPDATE settings SET groupId = ? WHERE chatId = ?";
     private static final String SELECT_GROUP_ID_BY_CHAT_ID = "SELECT groupId FROM settings WHERE chatId = ?";
     private static final String REMOVE_BY_CHAT_ID = "DELETE FROM settings WHERE chatId = ?";
 
@@ -31,12 +35,19 @@ public class H2DatabaseManager
     static
     {
         final JdbcDataSource jdbcDataSource = new JdbcDataSource();
-        jdbcDataSource.setUrl(JDBC_URL);
-        jdbcDataSource.setUser(JDBC_USERNAME);
-        jdbcDataSource.setPassword(JDBC_PASSWORD);
 
         try
         {
+            final Path h2DatabaseDir = Path.of("h2-database");
+            DIRECTORY_DB = Files.exists(h2DatabaseDir) ?
+                    h2DatabaseDir
+                    : Files.createDirectory(h2DatabaseDir);
+            JDBC_URL = "jdbc:h2:" + DIRECTORY_DB.toAbsolutePath() + "/tgbot";
+
+            jdbcDataSource.setUrl(JDBC_URL);
+            jdbcDataSource.setUser(JDBC_USERNAME);
+            jdbcDataSource.setPassword(JDBC_PASSWORD);
+
             connectionPool = JdbcConnectionPool.create(jdbcDataSource);
             initTable();
         }
@@ -118,12 +129,32 @@ public class H2DatabaseManager
              final PreparedStatement preparedStatement = connection.prepareStatement(REMOVE_BY_CHAT_ID))
         {
             preparedStatement.setLong(1, chatId);
-            return preparedStatement.execute();
+            return preparedStatement.executeUpdate() != 0;
         }
         catch (SQLException e)
         {
             e.printStackTrace();
             return false;
+        }
+    }
+
+    /**
+     * Обновить таблицу настроек, изменить группу для пользователя
+     * @param groupId id группы
+     * @param chatId id чата
+     */
+    public static void updateSettings(final long groupId, final long chatId)
+    {
+        try (final Connection connection = connectionPool.getConnection();
+             final PreparedStatement preparedStatement = connection.prepareStatement(EDIT_SETTINGS_SQL))
+        {
+            preparedStatement.setLong(1, groupId);
+            preparedStatement.setLong(2, chatId);
+            preparedStatement.execute();
+        }
+        catch (SQLException e)
+        {
+            e.printStackTrace();
         }
     }
 }

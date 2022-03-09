@@ -3,6 +3,7 @@ package com.github.mattthey;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Iterator;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -39,28 +40,49 @@ public class TimeTableService
         return groupId;
     }
 
-    public static String getTimeTableForGroupId(final String groupId) throws IOException
+    private static Elements getTimeTableRows(final String groupId) throws IOException
     {
         final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd");
         final String date = dateFormat.format(new Date());
-        System.out.println("Current date = " + date);
         final String urlForGetTimetable = String.format("https://urfu.ru/api/schedule/groups/lessons/%s/%s/",
                 groupId, date);
         final Document document = Jsoup.connect(urlForGetTimetable).get();
-
         Element table = document.select("table").first(); //находим таблицу в документе
+        return table.select("tr");// разбиваем нашу таблицу на строки по тегу
+    }
 
-        Elements rows = table.select("tr");// разбиваем нашу таблицу на строки по тегу
+    public static String getTimeTableForGroupIdOnTwoWeek(final String groupId) throws IOException
+    {
+        final Elements rows = getTimeTableRows(groupId);
+        return getTimeTableByNDay(rows, rows.size());
+    }
 
+    public static String getTimeTableForGroupIdOnWeek(final String groupId) throws IOException
+    {
+        final Elements rows = getTimeTableRows(groupId);
+        return getTimeTableByNDay(rows, 7);
+    }
+
+    public static String getTimeTableForGroupIdOnDay(final String groupId) throws IOException
+    {
+        Elements rows = getTimeTableRows(groupId);
+        return getTimeTableByNDay(rows, 1);
+    }
+
+    private static String getTimeTableByNDay(final Elements rows, int countDay)
+    {
         final StringBuilder sb = new StringBuilder();
-
-        for (int i = 0; i < rows.size(); i++) {
-            Element row = rows.get(i); //по номеру индекса получает строку
-            Elements cols = row.select("td");// разбиваем полученную строку по тегу  на столбы
-            for (int j = 0; j < cols.size(); j++) {
-                sb.append(cols.get(j).text());// столбец
+        final Iterator<Element> iterator = rows.iterator();
+        while (countDay > 0 && iterator.hasNext())
+        {
+            final Element element = iterator.next();
+            final String elementText = element.text().trim();
+            sb.append(elementText)
+                    .append(System.lineSeparator());
+            if (element.attr("class").equals("divide") && elementText.isEmpty())
+            {
+                countDay--;
             }
-            sb.append(System.lineSeparator());
         }
         return sb.toString();
     }

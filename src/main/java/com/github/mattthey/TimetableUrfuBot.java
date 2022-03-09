@@ -2,13 +2,13 @@ package com.github.mattthey;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
@@ -17,9 +17,18 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
  */
 public class TimetableUrfuBot extends TelegramLongPollingBot
 {
-    private static final String GET_TIMETABLE = "Получить расписание";
+    private static final String GET_TIMETABLE_DAY = "Получить расписание на сегодня";
+    private static final String GET_TIMETABLE_FOR_WEEK = "Получить расписание на неделю";
+    private static final String GET_TIMETABLE_FOR_TWO_WEEK = "Получить расписание на 2 недели";
     private static final String REMOVE_SETTINGS = "Удалить номер группы";
     private static final String GET_SETTINGS = "Получить номер группы";
+
+    private static final Set<String> GET_TIMETABLE_COMMANDS = Set.of(
+            GET_TIMETABLE_DAY,
+            GET_TIMETABLE_FOR_WEEK,
+            GET_TIMETABLE_FOR_TWO_WEEK
+    );
+
     private final String botUsername;
     private final String botToken;
 
@@ -52,7 +61,7 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
                 final String text = message.getText();
                 // сначала проверяем не одна ли это из наших команд
                 final SendMessage sendMessage = new SendMessage();
-                if (text.equals(GET_TIMETABLE))
+                if (GET_TIMETABLE_COMMANDS.contains(text))
                 {
                     addTimetableInTextMessage(sendMessage, message);
                 }
@@ -84,14 +93,15 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
     {
         final String text = message.getText();
         final long groupId;
-        try {
+        try
+        {
             groupId = TimeTableService.getGroupIdByTitle(text);
         }
         catch (IOException e)
         {
             e.printStackTrace();
             sendMessage.setText("Извини, при получении id твоей группы возникли ошибки, свяжитесь с моими криворукими"
-                    + " создателями");
+                    + " создателями.");
             return;
         }
         if (groupId == -1)
@@ -100,7 +110,20 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
             return;
         }
         // если нашли все же группу, то сохраняем её в бд
-        H2DatabaseManager.addSettings(message.getChatId(), groupId);
+        final long groupIdFromDb = H2DatabaseManager.getGroupIdByChatId(message.getChatId());
+        if (groupIdFromDb == -1)
+        {
+            // не нашли группу, значит запись новая
+            H2DatabaseManager.addSettings(message.getChatId(), groupId);
+            addTextToSendMessage(sendMessage, "Кароче мы сохранили твои настройки.");
+        }
+        else
+        {
+            // нашли группу и обновляем запись
+            H2DatabaseManager.updateSettings(groupId, message.getChatId());
+            // сообщаем о том, что насттройки изменились
+            addTextToSendMessage(sendMessage, "Кароче мы обновили твои настройки.");
+        }
         // теперь отправляем желанное расписание
         addTimetableInTextMessage(sendMessage, message);
     }
@@ -114,11 +137,11 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
     {
         if (H2DatabaseManager.removeSettingsByChatId(message.getChatId()))
         {
-            sendMessage.setText("Мы успешно удалили твои настройки.");
+            addTextToSendMessage(sendMessage, "Мы успешно удалили твои настройки.");
         }
         else
         {
-            sendMessage.setText("Мы не смогли удалить твои настройки или же их не запомнили/потеряли, ну что поделать"
+            addTextToSendMessage(sendMessage, "Мы не смогли удалить твои настройки или же их не запомнили/потеряли, ну что поделать"
                     + " мы же не почта России.");
         }
     }
@@ -133,11 +156,11 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
         final long groupId = H2DatabaseManager.getGroupIdByChatId(message.getChatId());
         if (groupId == -1)
         {
-            sendMessage.setText("Сорян, мы не нашли в своей памяти номер твоей группы попробуй отправить её еще"
-                    + " раз, мы постараемся запомнить.");
+            addTextToSendMessage(sendMessage, "Сорян, мы не нашли в своей памяти номер твоей группы попробуй отправить"
+                    + " её еще раз, мы постараемся запомнить.");
             return;
         }
-        sendMessage.setText("Id твоей группы " + groupId + ". Все нормально, если оно не совпадает с номером, я "
+        addTextToSendMessage(sendMessage, "Id твоей группы " + groupId + ". Все нормально, если оно не совпадает с номером, я "
                 + "просто решил её не хранить, ибо она вроде как не нужна. Ну на данный момент.");
     }
 
@@ -151,22 +174,28 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
         final long groupId = H2DatabaseManager.getGroupIdByChatId(message.getChatId());
         if (groupId == -1)
         {
-            sendMessage.setText("Сорян, мы не нашли в своей памяти номер твоей группы попробуй отправить её еще"
+            addTextToSendMessage(sendMessage, "Сорян, мы не нашли в своей памяти номер твоей группы попробуй отправить её еще"
                     + " раз, мы постараемся запомнить.");
             return;
         }
         String timeTableForGroupId;
         try
         {
-            timeTableForGroupId = TimeTableService.getTimeTableForGroupId(
-                    Long.toString(groupId));
+            final String text = message.getText();
+            final String groupIdStr = Long.toString(groupId);
+            timeTableForGroupId = switch (text)
+            {
+                case GET_TIMETABLE_DAY -> TimeTableService.getTimeTableForGroupIdOnDay(groupIdStr);
+                case GET_TIMETABLE_FOR_WEEK -> TimeTableService.getTimeTableForGroupIdOnWeek(groupIdStr);
+                default -> TimeTableService.getTimeTableForGroupIdOnTwoWeek(groupIdStr);
+            };
         }
         catch (IOException e)
         {
             timeTableForGroupId = "Извини, возникли ошибки, свяжись с разрабами, они накосячили, они исправят.";
             e.printStackTrace();
         }
-        sendMessage.setText(timeTableForGroupId);
+        addTextToSendMessage(sendMessage, timeTableForGroupId);
     }
 
     /**
@@ -177,16 +206,39 @@ public class TimetableUrfuBot extends TelegramLongPollingBot
     {
         // создаем клавиатуру
         final ReplyKeyboardMarkup replyKeyboardMarkup = new ReplyKeyboardMarkup();
+
         final KeyboardRow keyboardButtons = new KeyboardRow();
-        keyboardButtons.add(GET_TIMETABLE);
+        keyboardButtons.add(GET_TIMETABLE_DAY);
 
         final KeyboardRow keyboardButtons1 = new KeyboardRow();
-        keyboardButtons1.add(GET_SETTINGS);
-        keyboardButtons1.add(REMOVE_SETTINGS);
+        keyboardButtons1.add(GET_TIMETABLE_FOR_WEEK);
 
-        replyKeyboardMarkup.setKeyboard(List.of(keyboardButtons, keyboardButtons1));
+        final KeyboardRow keyboardButtons2 = new KeyboardRow();
+        keyboardButtons2.add(GET_TIMETABLE_FOR_TWO_WEEK);
+
+        final KeyboardRow keyboardButtons3 = new KeyboardRow();
+        keyboardButtons3.add(GET_SETTINGS);
+        keyboardButtons3.add(REMOVE_SETTINGS);
+
+        replyKeyboardMarkup.setKeyboard(List.of(keyboardButtons, keyboardButtons1, keyboardButtons2, keyboardButtons3));
         replyKeyboardMarkup.setResizeKeyboard(true);
 
         sendMessage.setReplyMarkup(replyKeyboardMarkup);
+    }
+
+    /**
+     * Добавить к отправляемому сообщению новый текст.
+     * @param sendMessage отправляемое сообщение
+     * @param newText новый текст
+     */
+    private static void addTextToSendMessage(final SendMessage sendMessage, final String newText)
+    {
+        String textSendMessage = sendMessage.getText();
+        if (textSendMessage == null)
+        {
+            textSendMessage = "";
+        }
+        textSendMessage += System.lineSeparator().repeat(2) + newText;
+        sendMessage.setText(textSendMessage);
     }
 }
